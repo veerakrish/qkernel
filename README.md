@@ -17,8 +17,8 @@ transport with a real kernel driver.
 | Phase | Description | Status |
 |---|---|---|
 | 1 | Userspace daemon: job manager + qubit allocator + HAL over Qiskit Aer | ✅ done |
-| 2 | Linux kernel char device (`/dev/qpu0` + `/dev/qpu0worker`, `ioctl` job broker) | 🚧 in progress |
-| 3 | cgroups v2 resource limits, sysfs capability attributes, telemetry | ⬜ planned |
+| 2 | Linux kernel char device (`/dev/qpu0` + `/dev/qpu0worker`, `ioctl` job broker) | ✅ done |
+| 3 | cgroups v2 resource limits, sysfs capability attributes, telemetry | ✅ done |
 | 4 | Real cloud QPU backend behind the HAL (IBM Quantum) | ⬜ planned |
 
 ## Architecture (Phase 2, current)
@@ -47,6 +47,13 @@ rather than plumbing.
 exist as the original reference implementation and still run standalone, but
 `qctl` now speaks the kernel `ioctl` protocol exclusively — Phase 2 supersedes
 Phase 1 as the CLI's transport.
+
+Phase 3 adds capability/telemetry introspection and real resource enforcement
+around the worker process: `/sys/class/misc/qpu0/{qubits_total,qubits_in_use,
+jobs_submitted,jobs_completed,jobs_failed}` (read-only sysfs attributes,
+`qctl backends` reads these live) and running `kernel_worker.py` under a
+systemd transient scope with cgroup v2 `MemoryMax`/`CPUQuota` limits that are
+genuinely enforced by the kernel — see "Resource limits" below.
 
 ## Setup (inside WSL2 Ubuntu — this project targets Linux)
 
@@ -88,7 +95,29 @@ python3 -m cli.qctl backends
 ```
 
 `result` prints the measurement counts once the job finishes — for a Bell state
-you should see roughly a 50/50 split between `00` and `11`.
+you should see roughly a 50/50 split between `00` and `11`. `backends` shows
+live qubit usage and job counters from sysfs, not just static capacity.
+
+## Resource limits (cgroups v2)
+
+Instead of just launching the worker directly, run it under a systemd
+transient scope with real memory/CPU limits — this is genuinely enforced by
+the kernel's cgroup v2 memory controller, not just recorded configuration:
+
+```bash
+systemd-run --scope --unit=qkernel-worker -p MemoryMax=512M -p CPUQuota=50% \
+  bash -c 'cd $(pwd) && source .venv/bin/activate && python3 -m daemon.kernel_worker'
+```
+
+`systemctl status qkernel-worker.scope` shows live memory/CPU usage against
+the cap. To see the limit actually get enforced (not just configured), set
+`MemoryMax` well below Qiskit/Aer's real footprint (~100-150M) and add
+`-p MemorySwapMax=0` so there's no swap to fall back on — the process gets
+killed by the kernel, and `dmesg` shows a `Memory cgroup out of memory` entry
+naming the exact cgroup that triggered it. Without disabling swap, a tight
+`MemoryMax` alone won't reliably trigger a kill — the cgroup will push pages
+to swap under memory pressure instead, which is worth knowing since it's an
+easy thing to get wrong when testing a memory cap.
 
 ## Tests
 
@@ -118,7 +147,7 @@ worker, if you want to sanity-check the driver in isolation.
 - **No orphan-job recovery.** If a worker process dies after `FETCH` but
   before `COMPLETE`, that job is dequeued and stuck at `RUNNING` forever —
   nothing currently re-queues it. A heartbeat/timeout mechanism would fix
-  this; deferred to Phase 3 alongside the other resource-management work.
+  this; not yet built.
 
 ## Why this scope
 

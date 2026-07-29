@@ -1,10 +1,17 @@
 """Worker loop: fetches jobs from the qpu0 kernel driver, executes them on
-Qiskit Aer, and reports results back through the driver.
+a HAL backend, and reports results back through the driver.
 
 Requires the qpu_driver kernel module loaded. Run: python3 -m daemon.kernel_worker
+
+Backend selection is via QKERNEL_BACKEND ("aer", the default, or "ibm").
+For "ibm", QKERNEL_IBM_BACKEND_NAME optionally pins a specific device;
+otherwise the least-busy operational QPU is selected. IBM credentials must
+already be saved locally via QiskitRuntimeService.save_account() - this file
+never touches a token.
 """
 
 import json
+import os
 import sys
 import threading
 
@@ -12,8 +19,16 @@ from daemon.hal.aer_backend import AerSimulatorBackend
 from daemon.kdevice import QpuWorker
 
 
+def make_backend():
+    kind = os.environ.get("QKERNEL_BACKEND", "aer")
+    if kind == "ibm":
+        from daemon.hal.ibm_backend import IBMBackend
+        return IBMBackend(backend_name=os.environ.get("QKERNEL_IBM_BACKEND_NAME"))
+    return AerSimulatorBackend()
+
+
 def worker_loop(worker_id: int) -> None:
-    backend = AerSimulatorBackend()
+    backend = make_backend()
     worker = QpuWorker()
     print(f"[worker {worker_id}] ready, backend={backend.name} max_qubits={backend.max_qubits}")
     while True:

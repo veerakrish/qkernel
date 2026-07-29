@@ -19,7 +19,7 @@ transport with a real kernel driver.
 | 1 | Userspace daemon: job manager + qubit allocator + HAL over Qiskit Aer | ✅ done |
 | 2 | Linux kernel char device (`/dev/qpu0` + `/dev/qpu0worker`, `ioctl` job broker) | ✅ done |
 | 3 | cgroups v2 resource limits, sysfs capability attributes, telemetry | ✅ done |
-| 4 | Real cloud QPU backend behind the HAL (IBM Quantum) | ⬜ planned |
+| 4 | Real cloud QPU backend behind the HAL (IBM Quantum) | ✅ done |
 
 ## Architecture (Phase 2, current)
 
@@ -119,6 +119,44 @@ naming the exact cgroup that triggered it. Without disabling swap, a tight
 to swap under memory pressure instead, which is worth knowing since it's an
 easy thing to get wrong when testing a memory cap.
 
+## Running on real IBM Quantum hardware (Phase 4)
+
+The HAL's whole point is that `AerSimulatorBackend` isn't special-cased
+anywhere in the kernel driver, the worker loop, or the CLI — `daemon/hal/ibm_backend.py`
+implements the same `QuantumBackend` interface against `qiskit-ibm-runtime`,
+and swapping it in is a one-line environment variable, not a code change.
+
+Set up credentials once (this stores them in `~/.qiskit/qiskit-ibm-runtime.json`,
+outside the repo — never commit a token, never paste one anywhere it'll be
+logged, including into an AI chat):
+
+```bash
+python3 -c "
+from qiskit_ibm_runtime import QiskitRuntimeService
+QiskitRuntimeService.save_account(channel='ibm_quantum_platform', token='YOUR_TOKEN', overwrite=True)
+"
+```
+
+Then run the worker against IBM instead of Aer:
+
+```bash
+QKERNEL_BACKEND=ibm python3 -m daemon.kernel_worker
+```
+
+Everything else — `qctl submit`/`status`/`result`, the kernel driver, the
+qubit-capacity accounting — is unchanged. The only visible difference besides
+`backend=ibm_fez` (or whichever device is least busy) is that a real job
+queues on physical hardware, so it can take anywhere from under a minute to
+several minutes rather than Aer's near-instant response.
+
+One thing worth knowing if you try this: a real device's result won't be a
+clean 50/50 split for a Bell state the way Aer's is. Verified run against
+`ibm_fez` (156 qubits): `{'00': 519, '11': 494, '01': 9, '10': 2}` — the small
+leakage into `01`/`10` is genuine hardware noise/decoherence, not a bug. A
+perfect simulator can't produce that; a real NISQ-era device does. That
+noise signature is itself evidence the job actually ran on physical
+hardware rather than a simulator.
+
 ## Tests
 
 ```bash
@@ -157,5 +195,5 @@ is a multi-year research effort, not a portfolio project. This repo scopes down 
 the part that's buildable and demoable without lab access to real QPUs: a working
 job manager, a real resource-allocation policy (qubit capacity as a semaphore in
 Phase 1, an atomic counter in the kernel for Phase 2), a real Linux kernel driver,
-and a HAL abstraction that's proven against a simulator and, eventually, a real
-cloud backend.
+and a HAL abstraction proven against both a local simulator and real IBM Quantum
+hardware over the network.

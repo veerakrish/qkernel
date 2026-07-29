@@ -4,3 +4,13 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 *.sock
+
+# kernel module build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.symvers
+*.order
+*.cmd
+.tmp_versions/

@@ -13,6 +13,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/idr.h>
 #include <linux/list.h>
@@ -20,6 +21,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
@@ -30,6 +32,9 @@ module_param(qpu_total_qubits, int, 0444);
 MODULE_PARM_DESC(qpu_total_qubits, "total qubit capacity advertised by this backend");
 
 static atomic_t qpu_qubits_in_use = ATOMIC_INIT(0);
+static atomic_t qpu_jobs_submitted = ATOMIC_INIT(0);
+static atomic_t qpu_jobs_completed = ATOMIC_INIT(0);
+static atomic_t qpu_jobs_failed = ATOMIC_INIT(0);
 
 static DEFINE_IDR(qpu_jobs);
 static DEFINE_MUTEX(qpu_lock);
@@ -129,6 +134,7 @@ static long qpu_client_submit(struct qpu_submit __user *uarg)
 	list_add_tail(&job->pending_link, &qpu_pending);
 	mutex_unlock(&qpu_lock);
 
+	atomic_inc(&qpu_jobs_submitted);
 	wake_up_interruptible(&qpu_pending_wq);
 
 	arg->job_id = id;
@@ -291,6 +297,11 @@ static long qpu_worker_complete(struct qpu_complete __user *uarg)
 	atomic_sub(job->num_qubits, &qpu_qubits_in_use);
 	mutex_unlock(&qpu_lock);
 
+	if (arg->ok)
+		atomic_inc(&qpu_jobs_completed);
+	else
+		atomic_inc(&qpu_jobs_failed);
+
 out:
 	kfree(arg);
 	return ret;
@@ -320,6 +331,51 @@ static struct miscdevice qpu_worker_dev = {
 	.mode = 0666,
 };
 
+/* ---- sysfs: capability + telemetry attributes under /sys/class/misc/qpu0/ ---- */
+
+static ssize_t qubits_total_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", qpu_total_qubits);
+}
+static DEVICE_ATTR_RO(qubits_total);
+
+static ssize_t qubits_in_use_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", atomic_read(&qpu_qubits_in_use));
+}
+static DEVICE_ATTR_RO(qubits_in_use);
+
+static ssize_t jobs_submitted_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", atomic_read(&qpu_jobs_submitted));
+}
+static DEVICE_ATTR_RO(jobs_submitted);
+
+static ssize_t jobs_completed_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", atomic_read(&qpu_jobs_completed));
+}
+static DEVICE_ATTR_RO(jobs_completed);
+
+static ssize_t jobs_failed_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", atomic_read(&qpu_jobs_failed));
+}
+static DEVICE_ATTR_RO(jobs_failed);
+
+static struct attribute *qpu_attrs[] = {
+	&dev_attr_qubits_total.attr,
+	&dev_attr_qubits_in_use.attr,
+	&dev_attr_jobs_submitted.attr,
+	&dev_attr_jobs_completed.attr,
+	&dev_attr_jobs_failed.attr,
+	NULL,
+};
+
+static const struct attribute_group qpu_attr_group = {
+	.attrs = qpu_attrs,
+};
+
 /* ---- module init/exit ---- */
 
 static int __init qpu_init(void)
@@ -336,6 +392,13 @@ static int __init qpu_init(void)
 		return ret;
 	}
 
+	ret = sysfs_create_group(&qpu_client_dev.this_device->kobj, &qpu_attr_group);
+	if (ret) {
+		misc_deregister(&qpu_worker_dev);
+		misc_deregister(&qpu_client_dev);
+		return ret;
+	}
+
 	pr_info("qpu0: registered, capacity=%d qubits\n", qpu_total_qubits);
 	return 0;
 }
@@ -345,6 +408,7 @@ static void __exit qpu_exit(void)
 	struct qpu_job *job;
 	int id;
 
+	sysfs_remove_group(&qpu_client_dev.this_device->kobj, &qpu_attr_group);
 	misc_deregister(&qpu_worker_dev);
 	misc_deregister(&qpu_client_dev);
 

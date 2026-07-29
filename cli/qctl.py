@@ -42,9 +42,20 @@ def cmd_result(args: argparse.Namespace) -> None:
 
 
 def cmd_backends(_args: argparse.Namespace) -> None:
-    with open("/sys/module/qpu_driver/parameters/qpu_total_qubits") as f:
-        total_qubits = int(f.read().strip())
-    print(json.dumps({"name": "qpu0", "max_qubits": total_qubits}, indent=2))
+    base = "/sys/class/misc/qpu0"
+
+    def read_attr(name: str) -> int:
+        with open(f"{base}/{name}") as f:
+            return int(f.read().strip())
+
+    print(json.dumps({
+        "name": "qpu0",
+        "max_qubits": read_attr("qubits_total"),
+        "qubits_in_use": read_attr("qubits_in_use"),
+        "jobs_submitted": read_attr("jobs_submitted"),
+        "jobs_completed": read_attr("jobs_completed"),
+        "jobs_failed": read_attr("jobs_failed"),
+    }, indent=2))
 
 
 def main() -> None:

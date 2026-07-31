@@ -5,9 +5,9 @@ Requires the qpu_driver kernel module loaded. Run: python3 -m daemon.kernel_work
 
 Backend selection is via QKERNEL_BACKEND ("aer", the default, or "ibm").
 For "ibm", QKERNEL_IBM_BACKEND_NAME optionally pins a specific device;
-otherwise the least-busy operational QPU is selected. IBM credentials must
-already be saved locally via QiskitRuntimeService.save_account() - this file
-never touches a token.
+otherwise the least-busy operational QPU is selected. IBM credentials come
+from a .env file (QKERNEL_IBM_TOKEN) if present, otherwise from a locally
+saved account (QiskitRuntimeService.save_account()) - see .env.example.
 """
 
 import json
@@ -15,8 +15,12 @@ import os
 import sys
 import threading
 
+from dotenv import load_dotenv
+
 from daemon.hal.aer_backend import AerSimulatorBackend
 from daemon.kdevice import QpuWorker
+
+load_dotenv()
 
 
 def make_backend():

@@ -1,3 +1,5 @@
+import os
+
 from qiskit import QuantumCircuit, transpile
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import SamplerV2 as Sampler
@@ -8,12 +10,21 @@ from .base import QuantumBackend
 class IBMBackend(QuantumBackend):
     """Dispatches circuits to IBM Quantum over the network via qiskit-ibm-runtime.
 
-    Credentials must already be saved locally (QiskitRuntimeService.save_account),
-    not passed here - this class never touches a token directly.
+    Two ways to authenticate, tried in this order:
+    1. QKERNEL_IBM_TOKEN env var (e.g. from a gitignored .env file) - explicit,
+       portable, good for scripts/CI.
+    2. A locally saved account (QiskitRuntimeService.save_account()) - the
+       default if no env var is set. Either way, a token is never hardcoded
+       or logged by this class.
     """
 
     def __init__(self, backend_name: str | None = None):
-        self._service = QiskitRuntimeService()
+        token = os.environ.get("QKERNEL_IBM_TOKEN")
+        if token:
+            channel = os.environ.get("QKERNEL_IBM_CHANNEL", "ibm_quantum_platform")
+            self._service = QiskitRuntimeService(channel=channel, token=token)
+        else:
+            self._service = QiskitRuntimeService()
         self._backend = (
             self._service.backend(backend_name)
             if backend_name

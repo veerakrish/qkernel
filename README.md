@@ -12,6 +12,11 @@ allocation, multi-backend abstraction). Phase 1 proved the daemon/HAL design out
 in pure userspace before any kernel code was written; Phase 2 replaces the
 transport with a real kernel driver.
 
+**Running your own circuits, including on real IBM hardware? See
+[GETTING_STARTED.md](GETTING_STARTED.md)** for a step-by-step walkthrough,
+IBM API key setup, debugging steps, and an honest comparison against just
+using IBM's own web platform.
+
 ## Status
 
 | Phase | Description | Status |

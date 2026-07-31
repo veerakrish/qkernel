@@ -1,4 +1,5 @@
 qiskit>=1.0
 qiskit-aer>=0.14
 qiskit-ibm-runtime>=0.29
+python-dotenv>=1.0
 pytest>=8.0

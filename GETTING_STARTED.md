@@ -56,6 +56,53 @@ Two constraints worth knowing before you do this:
   testing used `Estimator` or `.save_statevector()`, that path isn't wired
   up here — only circuits ending in measurement.
 
+### Worked example: a larger circuit (e.g. 30 qubits)
+
+Same workflow as above — a bigger qubit count doesn't change the steps:
+
+```python
+from qiskit import qasm2
+
+qasm_text = qasm2.dumps(my_30_qubit_circuit)
+with open("my_circuit.qasm", "w") as f:
+    f.write(qasm_text)
+```
+
+```bash
+python3 -m cli.qctl submit my_circuit.qasm --shots 1024
+```
+
+Two real constraints apply here specifically, both about qkernel's design,
+not IBM's:
+
+**a) The 4096-byte QASM buffer is a constraint on circuit *depth* (total gate
+count), not qubit count directly.** 30 qubits with a shallow circuit (tens of
+gates) fits easily; 30 qubits with hundreds of gates might not. Check the
+size before submitting:
+
+```python
+print(len(qasm_text.encode()))  # must be < 4096
+```
+
+If it's over, that's a real, documented limitation (see README's "Known
+limitations") — not something you're doing wrong.
+
+**b) The kernel's qubit-capacity check is a static number set when the
+module loads, not the actual backend's real capacity.** It defaults to 32
+(`qpu_total_qubits=32`), checked regardless of whether you're running
+against Aer or IBM's 156-qubit hardware. A 30-qubit circuit fits fine under
+the default (30 < 32). If you ever need more — say a 50-qubit circuit
+against real IBM hardware — reload the module with a higher value:
+
+```bash
+sudo rmmod qpu_driver
+sudo insmod qpu_driver.ko qpu_total_qubits=156
+```
+
+This is a slightly awkward part of the current design worth knowing about:
+the kernel doesn't dynamically know which backend a job will actually run
+on, it just enforces whatever number the module was loaded with.
+
 ## 3. Submit, monitor, retrieve results
 
 Terminal 1 — start the worker (fetches jobs, executes them):
